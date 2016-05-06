@@ -1,13 +1,10 @@
 #!/usr/bin/env python
 """Preprocesses and compiles a Serpent project, then uploads it to the Ethereum network."""
-import warnings; warnings.simplefilter('ignore')
-import serpent
-from ethereum import tester as t
-import pyrpctools as rpc
+from serpent_tests import Tester
+import rpctools as rpc
 import os
 import sys
 import sha3
-import json
 import time
 import shutil
 import traceback
@@ -16,44 +13,24 @@ import argparse
 
 def parse_args():
     """Parses command line options and positional arguments."""
-    epilog = '''\
-'''
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     epilog=)
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-b', '--blocktime', type=float, default=12.0, metavar='T', help='Time to wait between contract submissions.')
+    parser.add_argument('-B', '--build', help='Specifies the name of the build directory.', default='build')
     parser.add_argument('-c', '--contract', help='The name of a contract to recompile.')
     parser.add_argument('-C', '--chdir', help='Run the script as if from the supplied directory.')
     backend = parser.add_mutually_exclusive_group()
     backend.add_argument('-H', '--http', help='IPv4 address:port for the geth node to connect to.')
     backend.add_argument('-i', '--ipc', help='Path to your Ethereum node\'s ipc socket.')
-    parser.add_argument('-s', '--source', help='The directory to search for Serpent code, or a config file')
+    parser.add_argument('-R', '--recursive', help='Search the supplied source directories recursively for contracts.', default=False, action='store_true')
+    parser.add_argument('-s', '--source', help='The directory to search for Serpent code, or a config file', action='append')
     parser.add_argument('-t', '--testnet', help='Use the defaults for a geth node started with the testnet script.', action='store_true', default=False)
     parser.add_argument('-v', '--verbose', help='Prints all JSONRPC messages to stdout.')
-    
+    return parser.parse_args()
         
-def get_fullname(shortname):
-    '''
-    Takes a short name from an import statement and
-    returns a real path to that contract. The term
-    "fullname" is used to refer to the full path of
-    the contract file throughout this code. The term
-    "shortname" is used to refer to the contract name
-    alone, without the rest of the path info.
-    '''
-    for directory, subdirs, files in os.walk(SOURCE):
-        for f in files:
-            if f == shortname + '.se':
-                return os.path.join(directory, f)
-    raise ValueError('No such name: '+shortname)
-
-def get_shortname(fullname):
-    # the [:-3] is because all file names end in ".se"
-    return os.path.basename(fullname)[:-3]
 
 def cost_estimate(code):
-    s = t.state()
-    c = s.abi_contract(code)
-    return s.block.gas_used
+    return Tester(code).gas_cost
+
 
 def broadcast_code(evm, code, fullname):
     '''Sends compiled code to the network, and returns the address.'''
