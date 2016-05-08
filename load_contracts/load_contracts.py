@@ -1,8 +1,10 @@
 #!/usr/bin/env python
-"""Preprocesses and compiles a Serpent project, then uploads it to the Ethereum network."""
+"""Preprocesses and compiles Serpent projects, then uploads them to the Ethereum network."""
 from serpent_tests import Tester
-import rpctools as rpc
+import rpctools
 import os
+import stat
+import re
 import sys
 import sha3
 import time
@@ -11,34 +13,65 @@ import traceback
 import argparse
 
 
-def parse_args():
-    """Parses command line options and positional arguments."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-b', '--blocktime', type=float, default=12.0, metavar='T', help='Time to wait between contract submissions.')
-    parser.add_argument('-B', '--build', help='Specifies the name of the build directory.', default='build')
-    parser.add_argument('-c', '--contract', help='The name of a contract to recompile.')
-    parser.add_argument('-C', '--chdir', help='Run the script as if from the supplied directory.')
-    backend = parser.add_mutually_exclusive_group()
-    backend.add_argument('-H', '--http', help='IPv4 address:port for the geth node to connect to.')
-    backend.add_argument('-i', '--ipc', help='Path to your Ethereum node\'s ipc socket.')
-    parser.add_argument('-R', '--recursive', help='Search the supplied source directories recursively for contracts.', default=False, action='store_true')
-    parser.add_argument('-s', '--source', help='The directory to search for Serpent code, or a config file', action='append')
-    parser.add_argument('-t', '--testnet', help='Use the defaults for a geth node started with the testnet script.', action='store_true', default=False)
-    parser.add_argument('-v', '--verbose', help='Prints all JSONRPC messages to stdout.')
-    return parser.parse_args()
+class CompilerError(Exception): pass
+
+
+class Compiler(object):
+    gas = '0x2fefd8'
+    testnet = {'ipc': os.path.join(os.environ['HOME'], '.testnet', 'geth.ipc'),
+               'http': 'localhost:9090'}
+    http = re.compile('^(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[\w.])+:\d{1,5}$')
+    ethaddress = re.compile('^x[0-9a-f]{40}$')
+    
+    def __init__(self, args, creator=''):
+        self.call_args = args
+        self.parse_args()
+
+        if self.args.address is not None:
+            address = self.args.address
+        else:
+            address = self.testnet[self.args.testnet]
+
+        if os.path.isfile(address) and stat.S_ISSOCK(os.stat(address).st_mode):
+            self.rpc_client = rpctools.IPCRPCClient(address)
+        elif http.match(address):
+            self.rpc_client = rpctools.HTTPRPCClient(address)
+        else:
+            raise CompilerError('Invalid address for rpc client: {}'.format(address))
+
+        if not eth.match(creator):
+            self.creator_address = self.rpc_client.eth_coinbase()['result']
+        else:
+            self.creator_address = creator
+            
+    def parse_args(self):
+        """Parses command line options and positional arguments."""
+        parser = argparse.ArgumentParser(description=__doc__)
+        backend = parser.add_mutually_exclusive_group(required=True)
+        backend.add_argument('-a', '--address', help='Address for JSON  RPC server. Must be either host:port or path/to/geth.ipc', default=None)
+        backend.add_argument('-t', '--testnet', help='Use the defaults for a geth node started with the testnet script.', choices=['ipc', 'http'], default='ipc')
+        parser.add_argument('-b', '--blocktime', type=float, default=12.0, metavar='T', help='Time to wait between contract submissions.')
+        parser.add_argument('-B', '--build', help='Specifies the name of the build directory.', default='build')
+        parser.add_argument('-c', '--contract', help='The name of a contract to recompile.')
+        parser.add_argument('-C', '--chdir', help='Run the script as if from the supplied directory.')
+        parser.add_argument('-R', '--recursive', help='Search the supplied source directories recursively for contracts.', default=False, action='store_true')
+        parser.add_argument('-s', '--source', help='The directory to search for Serpent code, or a config file', action='append')
+        parser.add_argument('-v', '--verbose', help='Prints all JSONRPC messages to stdout.')
+        self.args = parser.parse_args(self.call_args)
         
+    @staticmethod
+    def gas_estimate(code):
+        '''Estimates the gas cost of putting Serpent code on the blockchain.'''
+        return Tester(code).gas_cost
 
-def cost_estimate(code):
-    return Tester(code).gas_cost
-
-
-def broadcast_code(evm, code, fullname):
+    def get_contract_info(self):
+        #TODO: iterate through self.args.source and search each directory for .se files
+        pass
+    
+def broadcast_code(rpc_client, evm, creator_address, gas):
     '''Sends compiled code to the network, and returns the address.'''
-    result = RPC.eth_sendTransaction(
-        sender=COINBASE,
-        data=evm,
-        gas=rpc.MAXGAS)
-
+    tx = {'from':creator_address, 'data':evm, 'gas':gas}
+    result = rpc_client.eth_sendTransaction(tx)
     if 'error' in result:
         code = result['error']['code']
         message = result['error']['message']
