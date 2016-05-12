@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-"""Preprocesses and compiles Serpent projects, then uploads them to the Ethereum network."""
 from serpent_tests import Tester
 import rpctools
 import rlp
@@ -10,7 +9,6 @@ import sys
 import sha3
 import time
 import traceback
-import argparse
 
 
 class CompilerError(Exception): pass
@@ -23,7 +21,7 @@ class Compiler(object):
     http = re.compile('^(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[\w.])+:\d{1,5}$')
     ethaddress = re.compile('^0x[0-9a-f]{40}$')
     
-    def __init__(self, args, creator=''):
+    def __init__(self, , creator=''):
         self.call_args = args
         self.parse_args()
 
@@ -47,21 +45,6 @@ class Compiler(object):
         self.raw_creator_address = self.creator_address[2:].decode('hex')
 
         self.contract_info = []
-
-    def parse_args(self):
-        """Parses command line options and positional arguments."""
-        parser = argparse.ArgumentParser(description=__doc__)
-        backend = parser.add_mutually_exclusive_group(required=True)
-        backend.add_argument('-a', '--address', help='Address for JSON  RPC server. Must be either host:port or path/to/geth.ipc', default=None)
-        backend.add_argument('-t', '--testnet', help='Use the defaults for a geth node started with the testnet script.', choices=['ipc', 'http'], default='ipc')
-        parser.add_argument('-b', '--blocktime', type=float, default=12.0, metavar='T', help='Time to wait between contract submissions.')
-        parser.add_argument('-B', '--build', help='Specifies the name of the build directory.', default='build')
-        parser.add_argument('-c', '--contract', help='The name of a contract to recompile.')
-        parser.add_argument('-C', '--chdir', help='Treat source and build paths as relative to the supplied directory.')
-        parser.add_argument('-R', '--recursive', help='Search the supplied source directories recursively for contracts.', default=False, action='store_true')
-        parser.add_argument('-s', '--source', help='The directory to search for Serpent code, or a config file', action='append')
-        parser.add_argument('-v', '--verbose', help='Prints all JSONRPC messages to stdout.')
-        self.args = parser.parse_args(self.call_args)
         
     @staticmethod
     def gas_estimate(code):
@@ -79,8 +62,7 @@ class Compiler(object):
         '''Finds the paths in the supplied source directories that are Serpent contracts.'''
         for src_dir in self.args.source:
             if self.args.chdir:
-                src_dir = os.path.normpath(os.path.join(self.args.chdir,
-                                                        src_dir))
+                src_dir = os.path.normpath(os.path.join(self.args.chdir, src_dir))
 
             if not os.path.isdir(src_dir):
                 raise CompilerError('Source path is not a directory: {}'.format(directory))
@@ -98,8 +80,11 @@ class Compiler(object):
         tx_nonce = self.rpc.eth_getTransactionCount(self.creator_address)['result']
         for i, c_info in enumerate(self.contract_info):
             seed_data = rlp.encode([self.raw_creator_address, tx_nonce + i])
-            address = '0x' + sha3.sha3_256(seed_data).hexdigest()[24:]
+            address = '0x' + sha3.sha3_256(seed_data).digest()[12:].encode('hex')
             c_info['address'] = address
+
+    def preprocess_code(self):
+        ''''''
 
 
 # Code that needs to be rewritten
