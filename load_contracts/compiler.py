@@ -21,21 +21,14 @@ class Compiler(object):
     http = re.compile('^(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[\w.])+:\d{1,5}$')
     ethaddress = re.compile('^0x[0-9a-f]{40}$')
     
-    def __init__(self, , creator=''):
-        self.call_args = args
-        self.parse_args()
+    def __init__(self, rpcAddress, sources, recursive, blocktime, build, creator=''):
 
-        if self.args.address is not None:
-            address = self.args.address
+        if os.path.isfile(rpcAddress) and stat.S_ISSOCK(os.stat(rpcAddress).st_mode):
+            self.rpc_client = rpctools.IPCRPCClient(rpcAddress)
+        elif http.match(rpcAddress):
+            self.rpc_client = rpctools.HTTPRPCClient(rpcAddress)
         else:
-            address = self.testnet[self.args.testnet]
-
-        if os.path.isfile(address) and stat.S_ISSOCK(os.stat(address).st_mode):
-            self.rpc_client = rpctools.IPCRPCClient(address)
-        elif http.match(address):
-            self.rpc_client = rpctools.HTTPRPCClient(address)
-        else:
-            raise CompilerError('Invalid rpc address: {}'.format(address))
+            raise CompilerError('Invalid rpc address: {}'.format(rpcAddress))
 
         if not ethaddress.match(creator):
             self.creator_address = self.rpc_client.eth_coinbase()['result']
@@ -45,6 +38,8 @@ class Compiler(object):
         self.raw_creator_address = self.creator_address[2:].decode('hex')
 
         self.contract_info = []
+        self.shortname_to_info = {}
+        self.longname_to_info = {}
         
     @staticmethod
     def gas_estimate(code):
