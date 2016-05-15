@@ -1,0 +1,45 @@
+# -*- mode: python -*-
+
+macro True: 1
+macro False: 0
+
+def getloc(owner, key):
+    with temp = alloc(64):
+        temp[0] = owner
+        temp[1] = key
+        return(sha3(temp, items=2))
+
+def register(key, val):
+    with loc = self.getloc(msg.sender, key):
+        with currentVal = sload(loc):
+            if currentVal == 0:
+                sstore(loc, val)
+                return(True)
+            else:
+                return(False)
+
+def unregister(key):
+    with loc = self.getloc(msg.sender, key):
+        with current_val = sload(loc):
+            if current_val != 0:
+                sstore(loc, 0)
+                return(True)
+            else:
+                return(False)
+
+def update(key, val):
+    with loc = self.getloc(msg.sender, key):
+        with current_val = sload(loc):
+            if current_val != 0:
+                sstore(loc, val)
+                return(True)
+            else:
+                return(False)
+
+def get_own_val(key):
+    with loc = self.getloc(msg.sender, key):
+        return(sload(loc))
+
+def get_val(owner, key):
+    with loc = self.getloc(owner, key):
+        return(sload(loc))

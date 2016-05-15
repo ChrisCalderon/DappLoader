@@ -10,5 +10,7 @@ setup(name='LoadContracts',
       description='Uploads Serpent Dapps onto the Ethereum network',
       author='ChrisCalderon',
       author_email='calderon.christian760@gmail.com',
+      license='MIT',
       packages=['load_contracts'],
+      package_data={'load_contracts':['*.se']},
       install_requires=requirements)

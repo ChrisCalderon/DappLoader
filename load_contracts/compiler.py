@@ -16,12 +16,12 @@ class CompilerError(Exception): pass
 
 class Compiler(object):
 
-    gas = '0x2fefd8'
+    gas = '0x2fefd8' # pi million :^)
     http_pattern = re.compile('((?P<ip>^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|(?P<host>^\w+)):(?P<port>\d{1,5}$)')
     ethaddr_pattern = re.compile('^0x[0-9a-f]{40}$')
     import_pattern = re.compile('^import (?P<module>\S+) as (?P<name>\S+)$')
     
-    def __init__(self, rpc_address, sources=('src',), recursive=True, blocktime=12.0, build='build', chdir=None, creator=''):
+    def __init__(self, rpc_address, sources=('src',), recursive=True, blocktime=12.0, build='build', chdir=None, creator='', controller=''):
         '''Compiles a group of Serpent contracts.
 
         Arguments:
@@ -32,12 +32,31 @@ class Compiler(object):
         build -- Name of the directory to write build data to.
         chdir -- Relative paths in the "sources" argument are relative to this path.
         creator -- Ethereum address to use for creating the contracts.
+        controller -- Specifies how to control access to contracts.
+
+        The "controller" argument changes the behavior of the Compiler class a lot depending on it's value.
+        There are three ways intra-contract access can work in a Dapp. The first, simplest way is that each contract
+        can contain the address of every other contract in the Dapp that it needs to use. In this scenario, each
+        "import <contract> as <name>" line gets translated into "macro <name>: <contract address>" before the contracts are compiled.
+        This is the default behavior, and this is what happens when the "controller" isn't specified. Another supported way of 
+        organizing intra-contract access is to use a registry contract to hold key -> address mappings which are owned by a single address.
+        These mappings are then used by each contract to look up the address of every other contract in the Dapp which they need to 
+        access. If the "controller" is an address, then it is used in conjunction with a registry contract in the way just described,
+        with the specified address used as the owner. A JSON file filled with the neccesary transactions is then put into a file called 
+        registry.json which the owner of the "controller" address must use to set the proper entries in the registry in order for the
+        contracts to work. If, instead of an address, the "controller" is the name of a contract in the Dapp, then that contract's address
+        will be used as the owner, and it will have code added to it "init" function which set's up it's registry.
+
+        If there is no contract named "registry.se" in the Dapp and the Ethereum node is running on the main network, then a registry
+        contract on the main network is used. If it is running on a test network, then a registry contract is downloaded and added to the
+        Dapp.
         '''
         
         m = Compiler.http_pattern.match(rpc_address)
         if m:
-            ip = m['ip']
-            addr = ip if ip else m['host'], int(m['port'])
+            d = m.groupdict()
+            ip = d['ip']
+            addr = ip if ip else d['host'], int(d['port'])
             self.rpc_address = addr
             self.RpcClass = rpctools.HTTPRPCClient
         elif Compiler.is_uds_addr(rpc_address): 
@@ -136,14 +155,29 @@ class Compiler(object):
             shortcut = os.path.basename(c_info['path'])[:-3]
             self.shortcuts[shortcut] = c_info
 
-    def preprocess_code(self):
+    def preprocess_with_macros(self):
+        '''Default strategy for dealing with intra-Dapp contract access.'''
         for c_info in self.contract_info:
             with open(c_info['path']) as f:
                 new_code = []
                 for line in f:
-                    if f.startswith('import'):
-            
+                    m = Compiler.import_pattern.match(line)
+                    if m:
+                        d = m.groupdict()
+                        shortcut = d['module']
+                        macro = d['name']
+                        address = self.shortcuts[shortcut]['address']
+                        new_line = 'macro {}: {}\n'.format(macro, address)
+                        new_code.append(new_line)
+                    else:
+                        new_code.append(line)
+                c_info['new_code'] = ''.join(new_code)
+        
+    def preprocess_with_controller_address(self):
+        pass
 
+    def preprocess_with_controller_contract(self):
+        pass
 
 # Code that needs to be rewritten
 
