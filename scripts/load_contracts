@@ -2,6 +2,7 @@
 # -*- mode : python -*-
 """Preprocesses and compiles Serpent projects, then uploads them to the Ethereum network."""
 import argparse
+import sys
 from load_contracts import Compiler
 
 def parse_args():
@@ -10,11 +11,36 @@ def parse_args():
     backend = parser.add_mutually_exclusive_group(required=True)
     backend.add_argument('-a', '--address', help='Address for JSON  RPC server. Must be either host:port or path/to/geth.ipc', default=None)
     backend.add_argument('-t', '--testnet', help='Use the defaults for a geth node started with the testnet script.', choices=['ipc', 'http'], default='ipc')
+    parser.add_argument('-A', '--creator', help='Address to use for contract creation', default=None)
     parser.add_argument('-b', '--blocktime', type=float, default=12.0, metavar='T', help='Time to wait between contract submissions.')
     parser.add_argument('-B', '--build', help='Specifies the name of the build directory.', default='build')
     parser.add_argument('-c', '--contract', help='The name of a contract to recompile.')
     parser.add_argument('-C', '--chdir', help='Treat source and build paths as relative to the supplied directory.')
     parser.add_argument('-R', '--recursive', help='Search the supplied source directories recursively for contracts.', default=False, action='store_true')
-    parser.add_argument('-s', '--source', help='The directory to search for Serpent code, or a config file', action='append')
+    parser.add_argument('-s', '--source', help='A directory to search for Serpent code, or a config file', action='append')
     parser.add_argument('-v', '--verbose', help='Prints all JSONRPC messages to stdout.')
     return parser.parse_args()
+
+def main():
+        testnet = {'ipc': os.path.join(os.environ['HOME'], '.testnet', 'geth.ipc'),
+                   'http': 'localhost:9090'}
+        args = parse_args()
+        
+        if args.address:
+            rpc_address = args.address
+        elif args.testnet == 'ipc':
+            rpc_address = testnet['ipc']
+        else:
+            rpc_address = testnet['http']
+
+        if not (0 < args.blocktime < float('+inf')):
+            print 'blocktime value out of range! (0, inf)'
+            sys.exit(2)
+
+        compiler = Compiler(rpc_address, args.source, args.recursive, args.blocktime, args.build, args.chdir, args.creator)
+        
+        compiler.run()
+        sys.exit(0)
+
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 from serpent_tests import Tester
 import rpctools
 import rlp
@@ -9,38 +8,98 @@ import sys
 import sha3
 import time
 import traceback
+import socket
 
 
 class CompilerError(Exception): pass
 
 
 class Compiler(object):
+
     gas = '0x2fefd8'
-    testnet = {'ipc': os.path.join(os.environ['HOME'], '.testnet', 'geth.ipc'),
-               'http': 'localhost:9090'}
-    http = re.compile('^(?:\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[\w.])+:\d{1,5}$')
-    ethaddress = re.compile('^0x[0-9a-f]{40}$')
+    http_pattern = re.compile('((?P<ip>^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|(?P<host>^\w+)):(?P<port>\d{1,5}$)')
+    ethaddr_pattern = re.compile('^0x[0-9a-f]{40}$')
+    import_pattern = re.compile('^import (?P<module>\S+) as (?P<name>\S+)$')
     
-    def __init__(self, rpcAddress, sources, recursive, blocktime, build, creator=''):
+    def __init__(self, rpc_address, sources=('src',), recursive=True, blocktime=12.0, build='build', chdir=None, creator=''):
+        '''Compiles a group of Serpent contracts.
 
-        if os.path.isfile(rpcAddress) and stat.S_ISSOCK(os.stat(rpcAddress).st_mode):
-            self.rpc_client = rpctools.IPCRPCClient(rpcAddress)
-        elif http.match(rpcAddress):
-            self.rpc_client = rpctools.HTTPRPCClient(rpcAddress)
+        Arguments:
+        rpcAddress -- The address of an Ethereum node to connect to. Only paths to UDSes and host:port strings are acceptable.
+        sources -- A list of paths to search for Serpent contracts.
+        recursive -- Search the sources recursively for contracts.
+        blocktime -- Amount of time in seconds to wait before sending each contract. Can be float.
+        build -- Name of the directory to write build data to.
+        chdir -- Relative paths in the "sources" argument are relative to this path.
+        creator -- Ethereum address to use for creating the contracts.
+        '''
+        
+        m = Compiler.http_pattern.match(rpc_address)
+        if m:
+            ip = m['ip']
+            addr = ip if ip else m['host'], int(m['port'])
+            self.rpc_address = addr
+            self.RpcClass = rpctools.HTTPRPCClient
+        elif Compiler.is_uds_addr(rpc_address): 
+            self.rpc_address = rpc_address
+            self.RpcClass = rpctools.IPCRPCClient
         else:
-            raise CompilerError('Invalid rpc address: {}'.format(rpcAddress))
+            raise CompilerError('Invalid rpc address: {}'.format(rpc_address))
+        self.rpc_client = None
 
-        if not ethaddress.match(creator):
-            self.creator_address = self.rpc_client.eth_coinbase()['result']
-        else:
+        if ethaddress.match(creator):
             self.creator_address = creator
+            self.raw_creator_address = creator[2:].decode('hex')
+        else:
+            self.creator_address = None
+            self.raw_creator_address = None
 
-        self.raw_creator_address = self.creator_address[2:].decode('hex')
+        self.sources = sources
+        self.recursive = recursive
+        self.build = build
+        self.chdir = chdir
+        self.blocktime = blocktime
 
         self.contract_info = []
-        self.shortname_to_info = {}
-        self.longname_to_info = {}
-        
+        self.shortcuts = {}
+
+    def get_creator_address(self):
+        creator = self.rpc_client.eth_coinbase()['result']
+        self.creator_address = creator
+        self.raw_creator_address = creator[2:].decode('hex')
+
+    def normalize_paths(self):
+        '''Makes all paths in sources point to absolute paths.'''
+        # This is called at the start of the compiling process to make sure all the
+        # paths exist and to make them easier to work with.
+        chdir = self.chdir
+        if chdir and os.path.isdir(chdir):
+            chdir = self.chdir = os.path.realpath(chdir)
+        elif chdir:
+            raise CompilerError('chdir path does not exist: {}'.format(repr(chdir)))
+        else:
+            chdir = self.chdir = os.getcwd()
+
+        sources = []
+        for src_dir in self.sources:
+            if not src_dir.startswith('/'):
+                sources.append(os.path.join(chdir, src_dir))
+            else:
+                sources.append(src_dir)
+
+        if all(map(os.path.isdir, sources)):
+            self.sources = map(os.path.realpath, sources)
+        else:
+            bad_paths = ', '.join(map(repr,
+                                      filter(lambda p: not os.path.isdir(p),
+                                             sources)))
+            raise CompilerError('These source paths aren\'t directories: {}'.format(bad_paths))
+
+    @staticmethod
+    def is_uds_addr(path):
+        '''True if path is the location of an existing Unix Domain Socket.'''
+        return os.path.isfile(path) and stat.S_ISSOCK(os.stat(path).st_mode)
+
     @staticmethod
     def gas_estimate(code):
         '''Estimates the gas cost of putting Serpent code on the blockchain.'''
@@ -55,14 +114,8 @@ class Compiler(object):
 
     def get_source_paths(self):
         '''Finds the paths in the supplied source directories that are Serpent contracts.'''
-        for src_dir in self.args.source:
-            if self.args.chdir:
-                src_dir = os.path.normpath(os.path.join(self.args.chdir, src_dir))
-
-            if not os.path.isdir(src_dir):
-                raise CompilerError('Source path is not a directory: {}'.format(directory))
-
-            if self.args.recursive:
+        for src_dir in self.sources:
+            if self.recursive:
                 for directory, subdirs, files in os.walk(src_dir):
                     for f in files:
                         self.add_source_path(directory, f)
@@ -72,14 +125,24 @@ class Compiler(object):
 
     def assign_addresses(self):
         '''Computed the address address for each source file.'''
-        tx_nonce = self.rpc.eth_getTransactionCount(self.creator_address)['result']
+        tx_nonce = self.rpc_client.eth_getTransactionCount(self.creator_address)['result']
         for i, c_info in enumerate(self.contract_info):
             seed_data = rlp.encode([self.raw_creator_address, tx_nonce + i])
             address = '0x' + sha3.sha3_256(seed_data).digest()[12:].encode('hex')
             c_info['address'] = address
 
+    def populate_shortcuts(self):
+        for c_info in self.contract_info:
+            shortcut = os.path.basename(c_info['path'])[:-3]
+            self.shortcuts[shortcut] = c_info
+
     def preprocess_code(self):
-        ''''''
+        for c_info in self.contract_info:
+            with open(c_info['path']) as f:
+                new_code = []
+                for line in f:
+                    if f.startswith('import'):
+            
 
 
 # Code that needs to be rewritten
