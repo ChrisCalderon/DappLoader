@@ -16,42 +16,62 @@ class CompilerError(Exception): pass
 
 class Compiler(object):
 
-    gas = '0x2fefd8' # pi million :^)
-    http_pattern = re.compile('((?P<ip>^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})|(?P<host>^\w+)):(?P<port>\d{1,5}$)')
+    gas = '0x2fefd8'
+    http_pattern = re.compile('('
+                              '(?P<ip>^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+                              '|'
+                              '(?P<host>^\w+))'
+                              ':(?P<port>\d{1,5}$)')
     ethaddr_pattern = re.compile('^0x[0-9a-f]{40}$')
     import_pattern = re.compile('^import (?P<module>\S+) as (?P<name>\S+)$')
     
-    def __init__(self, rpc_address, sources=('src',), recursive=True, blocktime=12.0, build='build', chdir=None, creator='', controller=''):
-        '''Compiles a group of Serpent contracts.
+    def __init__(self,
+                 sources=('src',),
+                 recursive=True,
+                 blocktime=12.0,
+                 build='build',
+                 rpc_address=None,
+                 chdir=None,
+                 creator=None,
+                 controller=None,
+                 registry=None):
+        '''Create a Compiler object for group of Serpent contracts.
 
         Arguments:
-        rpcAddress -- The address of an Ethereum node to connect to. Only paths to UDSes and host:port strings are acceptable.
         sources -- A list of paths to search for Serpent contracts.
         recursive -- Search the sources recursively for contracts.
-        blocktime -- Amount of time in seconds to wait before sending each contract. Can be float.
+        blocktime -- Amount of time in seconds to wait before sending each
+                     contract.
         build -- Name of the directory to write build data to.
-        chdir -- Relative paths in the "sources" argument are relative to this path.
+        rpcAddress -- The address of an Ethereum node to connect to. Only paths
+                      to Unix domain sockets and host:port strings are
+                      acceptable.
+        chdir -- Relative paths in the "sources" argument are relative to this
+                 path.
         creator -- Ethereum address to use for creating the contracts.
-        controller -- Specifies how to control access to contracts.
+        controller -- The contract name of the access controller.
+        registry -- The contract name or address of the registry being used.
 
-        The "controller" argument changes the behavior of the Compiler class a lot depending on it's value.
-        There are three ways intra-contract access can work in a Dapp. The first, simplest way is that each contract
-        can contain the address of every other contract in the Dapp that it needs to use. In this scenario, each
-        "import <contract> as <name>" line gets translated into "macro <name>: <contract address>" before the contracts are compiled.
-        This is the default behavior, and this is what happens when the "controller" isn't specified. Another supported way of 
-        organizing intra-contract access is to use a registry contract to hold key -> address mappings which are owned by a single address.
-        These mappings are then used by each contract to look up the address of every other contract in the Dapp which they need to 
-        access. If the "controller" is an address, then it is used in conjunction with a registry contract in the way just described,
-        with the specified address used as the owner. A JSON file filled with the neccesary transactions is then put into a file called 
-        registry.json which the owner of the "controller" address must use to set the proper entries in the registry in order for the
-        contracts to work. If, instead of an address, the "controller" is the name of a contract in the Dapp, then that contract's address
-        will be used as the owner, and it will have code added to it "init" function which set's up it's registry.
+        If creator is None, the the coinbase of the Ethereum node used for RPC
+        is used for contract creation.
 
-        If there is no contract named "registry.se" in the Dapp and the Ethereum node is running on the main network, then a registry
-        contract on the main network is used. If it is running on a test network, then a registry contract is downloaded and added to the
-        Dapp.
+        If controller and registry are both False, then all "import foo as bar"
+        statements are replaced with address macros and serpent signatures.
+
+        If registry is True and the rpc client is connected to the live
+        Ethereum network, then the live version of the registry contract found
+        at https://github.com/ChrisCalderon/Registry is used to lookup the
+        Dapp's contracts' addresses. If it is not on the live network, then
+        a the registry contract is added to the Dapp and used similarly.
+
+        If creator is an address, then a json file containing the transactions
+        necessary to populate your registry are dumped to a file called
+        registry_txs.json in the build directory. If it is the name of a
+        contract in the Dapp, then that contract has registry initialization
+        transactions added to it's init function.
         '''
         
+        ## Check whether or not to use HTTP or IPC for RPC.
         m = Compiler.http_pattern.match(rpc_address)
         if m:
             d = m.groupdict()
@@ -66,9 +86,11 @@ class Compiler(object):
             raise CompilerError('Invalid rpc address: {}'.format(rpc_address))
         self.rpc_client = None
 
+        ## Check whether or not creator is a valid address.
+        ## If not, set it up to be retrieved later.
         if ethaddress.match(creator):
-            self.creator_address = creator
-            self.raw_creator_address = creator[2:].decode('hex')
+            self.creator_address = creator # for contract creation/registry
+            self.raw_creator_address = creator[2:].decode('hex') # for generating addresses
         else:
             self.creator_address = None
             self.raw_creator_address = None
@@ -143,7 +165,7 @@ class Compiler(object):
                     self.add_source_path(src_dir, path)
 
     def assign_addresses(self):
-        '''Computed the address address for each source file.'''
+        '''Computed the address for each source file.'''
         tx_nonce = self.rpc_client.eth_getTransactionCount(self.creator_address)['result']
         for i, c_info in enumerate(self.contract_info):
             seed_data = rlp.encode([self.raw_creator_address, tx_nonce + i])

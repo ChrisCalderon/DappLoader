@@ -1,2 +1,2 @@
-https://github.com/ChrisCalderon/PyRPCTools/tarball/master
-https://github.com/ChrisCalderon/SerpentTests/tarball/master
+https://github.com/ChrisCalderon/PyRPCTools/tarball/master#egg=PyRPCTools
+https://github.com/ChrisCalderon/SerpentTests/tarball/master#egg=SerpentTests
