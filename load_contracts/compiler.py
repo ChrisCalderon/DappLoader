@@ -1,4 +1,3 @@
-from serpent_tests import Tester
 import rpctools
 import rlp
 import os
@@ -9,21 +8,20 @@ import sha3
 import time
 import traceback
 import socket
-
+from .preprocessors import SimplePreProcessor
 
 class CompilerError(Exception): pass
 
 
 class Compiler(object):
 
-    gas = '0x2fefd8'
+    gas = '0x47e7c4'
     http_pattern = re.compile('('
                               '(?P<ip>^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
                               '|'
                               '(?P<host>^\w+))'
                               ':(?P<port>\d{1,5}$)')
     ethaddr_pattern = re.compile('^0x[0-9a-f]{40}$')
-    import_pattern = re.compile('^import (?P<module>\S+) as (?P<name>\S+)$')
     
     def __init__(self,
                  sources=('src',),
@@ -70,6 +68,10 @@ class Compiler(object):
         contract in the Dapp, then that contract has registry initialization
         transactions added to it's init function.
         '''
+        if controller == False and registry == False:
+            self.preprocessor = SimplePreProcessor
+        else: # TODO: write two more preprocessors.
+            pass
         
         ## Check whether or not to use HTTP or IPC for RPC.
         m = Compiler.http_pattern.match(rpc_address)
