@@ -1,57 +1,36 @@
-import os
-import serpent
+# TODO: add registry to live network and put address here
+REG_ADDR = "0x0"
 
 
-class PreProcessorError(Exception): pass
+class PreprocessorError(Exception): pass
 
 
-class SimplePreProcessor(object):
-    """A simple address macro preprocessor."""
-    def __init__(self, code_info, build_dir):
-        """Make a preprocessor that maps imports to macros.
+def macro_preprocessor(dapp_namespace):
+    """Replaces import statements with an address macro."""
+    for name in dapp_namespace:
+        contract_info = dapp_namespace[name]
+        dep_code = []
+        for var_name in contract_info['dependencies']:
+            dep_name = contract_info['dependencies'][var_name]
+            dep_addr = dapp_namespace[dep_name]['address']
+            dep_code.append(dapp_namespace[dep_name]['signature'])
+            dep_code.append('macro {}: {}'.format(var_name, dep_addr))
+        dep_code.extend(contract_info['temp_code'])
+        contract_info['processed_code'] = '\n'.join(dep_code)
 
-        Arguments:
-        code_info - a list of dictionaries, containing the keys
-                    'addr' and 'path'.
-        build_dir - """
-        self.build_dir = build_dir
-        self.code_info = code_info
-        self.name_to_info = {}
-        for info in code_info:
-            name = os.path.basename(info['path']).rstrip('.se')
-            self.name_to_info[name] = info
 
-    def do_preprocess(self):
-        """Generates code that is ready to compile from known contract info."""
-        dependencies = {}
-        sanitized = {}
-        signatures = {}
-        # first pass generates signatures.
-        for name, info in self.name_to_info.items():
-            with open(info['path']) as original_code_file:
-                original_code = original_code_file.read().split('\n')
+def registry_preprocessor(dapp_namespace, controller):
+    """Replaces import statements with registry lookups + global variables.
 
-            sanitized[name] = []
-            dependencies[name] = []
-            for line in original_code:
-                if line.startswith('import'):
-                    dependencies[name].append(line)
-                else:
-                    sanitized[name].append(line)
+    `controller` is an address which will own the registry used and be able
+    to change/update the addresses."""
+    lookup_fmt = '    {{}} = {}.lookup({}, "{{}}")'.format(REG_ADDR, controller)
+    for name in dapp_namespace:
+        contract_info = dapp_namespace[name]
+        any_code = ['def any():']
+        for var_name in contract_info['dependencies']:
+            dep_key = contract_info['dependencies'][var_name]
+            any_code.append(lookup_fmt.format(var_name, dep_key))
 
-            sanitized_code = '\n'.join(sanitized[name])
-            signatures[name] = serpent.mk_signature(sanitized_code)
-
-        # second pass adds macros and signatures,
-        # now that the signatures have been generated.
-        for name, info in self.name_to_info:
-            dep_code = []
-            for dep in dependencies[name]:
-                dep_name, macro = dep.lstrip('import ').split(' as ')
-                sig = signatures[dep_name]
-                addr = self.name_to_info[dep_name]['addr']
-                dep_code.append(sig)
-                dep_code.append('macro {}: {}'.format(macro, addr))
-            
-            dep_code.extend(sanitized_code[name])
-            info['processed_code'] = '\n'.join(dep_code)
+        any_code.extend(contract_info['temp_code'])
+        contract_info['processed_code'] = '\n'.join(any_code)
