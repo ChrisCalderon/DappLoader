@@ -1,2 +1,2 @@
-# LoadContracts
-A python module for uploading Serpent Dapp projects.
+# DappLoader
+A python module for uploading Serpent Dapps.
