@@ -1,0 +1,8 @@
+{
+  "name": "dapploader",
+  "version": "1.0dev1",
+  "description": "Creates Serpent Dapps.",
+  "packages": ["dapploader"],
+  "author": "ChrisCalderon",
+  "author_email": "pythonwiz@protonmail.com"
+}
