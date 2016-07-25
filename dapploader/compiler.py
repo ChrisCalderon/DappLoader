@@ -1,20 +1,8 @@
-import rlp
-import os
-import re
-import sha3
-from collections import OrderedDict
-from load_contracts.preprocessors import macro_preprocessor, registry_preprocessor
-
 MAX_GAS = '0x47e7c4'
 ETH_ADDR = re.compile('^0x[0-9a-f]{40}$')
 
 
 class CompilerError(Exception): pass
-
-
-def path_to_name(path):
-    """Turns a path into a name for the dapp namespace."""
-    return os.path.basename(path).rstrip('.se')
 
 
 def sanitized(contract_info):
@@ -32,63 +20,17 @@ def sanitized(contract_info):
             'signature': serpent.mk_signature('\n'.join(temp_code))}
 
 
-def send_tx(rpc_client, tx):
-    pass
-
-
-def compile_dapp(sources, blocktime, , creator, controller):
-    """Compiles a serpent dapp.
+def compile_dapp(sender, namespace, preprocessor):
+    """Compiles a Serpent Dapp.
 
     Arguments:
-    sources       --   A iterable of paths to Serpent contracts to compile.
-    blocktime     --   Amount of time in seconds to wait before sending
-                       each contract.
-    rpc_client    --   An rpc client object connected to an Ethereum node.
-    creator       --   Address to use for contract creation.
-    controller    --   The owner of the registry and whitelist. If None,
-                       no registry or whitelist are created and contracts
-                       have addresses of dependencies added as macros. If
-                       the name of a contract in the dapp, that contract
-                       will control the registry and whitelist used by
-                       the dapp. If a valid Ethereum address, the address
-                       will control the registry and whitelist.
+    sender -- A sender object for sending transactions to the network.
+    namespace -- A Namespace object for the contracts in the Dapp.
+    preprocessor -- A Preprocessor object for translating import statements.
     """
-    rpc_client = rpctools.rpc_client_factory(rpc_address)
-    
-    if creator is None:
-        creator = rpc_client.eth_coinbase()['result']
         
-    if ETH_ADDR.match(creator):
-        raw_creator_address = creator[2:].decode('hex')
-    else:
-        err_msg = "Invalid creator address: {}"
-        raise CompilerError(err_msg.format(creator))
 
-    dapp_namespace = OrderedDict((path_to_name(p),{'path': p}) for p in sources)
-    start_nonce = int(rpc_client.eth_getTransactionCount(creator)['result'][2:], 16)
-    for i, name in enumerate(dapp_namespace):
-        contract_info = dapp_namespace[name]
-        addr_seed = rlp.encode([raw_creator_address, start_nonce + i])
-        contract_info['address'] = '0x' + sha3.sha3_256(addr_seed).hexdigest()[24:]
-        contract_info['raw_code'] = open(contract_info['path']).read().split('\n')
-        
-    for name in dapp_namespace:
-        contract_info = dapp_namespace[name]
-        contract_info.update(sanitized(contract_info))
 
-    if controller is None:
-        macro_preprocessor(dapp_namespace)
-    else:
-        if controller in dapp_namespace:
-            controller = dapp_namespace[controller]['address']
-        if ETH_ADDR.match(controller):
-            registry_preprocessor(dapp_namespace, controller)
-        else:
-            raise CompilerError("Invalid controller: {}".format(controller))
-
-    if controller is not None:
-        # TODO: make python module for registry and use it here.
-        pass
 
 
 # Code that needs to be rewritten
